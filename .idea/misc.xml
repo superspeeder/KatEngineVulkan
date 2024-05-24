@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CMakePythonSetting">
+    <option name="pythonIntegrationState" value="YES" />
+  </component>
+  <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
+  <component name="CidrRootsConfiguration">
+    <sourceRoots>
+      <file path="$PROJECT_DIR$/engine/src" />
+      <file path="$PROJECT_DIR$/game_sample/src" />
+    </sourceRoots>
+    <libraryRoots>
+      <file path="$PROJECT_DIR$/libs/entt" />
+      <file path="$PROJECT_DIR$/libs/katconsrvlib" />
+      <file path="$PROJECT_DIR$/libs/spdlog" />
+    </libraryRoots>
+  </component>
+  <component name="GithubDefaultAccount">
+    <option name="defaultAccountId" value="e10a6fd1-beff-4196-a901-4d6a7d05d9de" />
+  </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
+</project>
