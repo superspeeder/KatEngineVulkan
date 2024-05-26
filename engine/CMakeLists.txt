@@ -11,7 +11,7 @@ add_library(katengine src/kat/core.cpp src/kat/core.hpp
         src/kat/window.hpp)
 
 target_include_directories(katengine PUBLIC src/ ${CMAKE_CURRENT_BINARY_DIR}/incl)
-target_link_libraries(katengine PUBLIC spdlog::spdlog Vulkan::Vulkan Vulkan::shaderc_combined EnTT::EnTT glm::glm)
+target_link_libraries(katengine PUBLIC spdlog::spdlog Vulkan::Vulkan Vulkan::shaderc_combined EnTT::EnTT glm::glm glfw)
 target_compile_definitions(katengine PUBLIC -DUNICODE -DSPDLOG_WCHAR_TO_UTF8_SUPPORT)
 
 
