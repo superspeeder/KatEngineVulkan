@@ -597,14 +597,15 @@ namespace kat {
     }
 
     void Window::onHScroll(_In_ WPARAM wParam, _In_ LPARAM lParam) {
-        // TODO
+        OnHScrollRawSignal.publish(wParam, lParam);
     }
 
     void Window::onVScroll(_In_ WPARAM wParam, _In_ LPARAM lParam) {
-        // TODO
+        OnVScrollRawSignal.publish(wParam, lParam);
     }
 
     void Window::onMouseMove(_In_ WPARAM wParam, _In_ LPARAM lParam) {
+        int xPos =
     }
 
     void Window::onLButtonDown(_In_ WPARAM wParam, _In_ LPARAM lParam) {

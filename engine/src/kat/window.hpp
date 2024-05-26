@@ -119,6 +119,10 @@ namespace kat {
         VSCROLL = SC_VSCROLL,
     };
 
+    struct ModifierKeyInfo {
+        bool control, leftButton, middleButton, rightButton, shift, xButton1, xButton2, alt;
+    };
+
     KeyEventInfo procKeyEventInfo(WPARAM wParam, LPARAM lParam);
 
     class Window {
@@ -177,6 +181,8 @@ namespace kat {
         KAT_SIGNAL(OnCommand, void(WPARAM, LPARAM)); // see WM_COMMAND
         KAT_SIGNAL(OnContextMenu, void(glm::ivec2));
         KAT_SIGNAL(OnTimer, void(WPARAM, LPARAM));
+        KAT_SIGNAL(OnHScrollRaw, void(WPARAM, LPARAM));
+        KAT_SIGNAL(OnVScrollRaw, void(WPARAM, LPARAM));
 
       private:
         HWND m_Handle;

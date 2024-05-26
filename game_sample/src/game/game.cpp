@@ -2,35 +2,9 @@
 #include "kat/core.hpp"
 #include "kat/window.hpp"
 
+#include <conio.h>
 #include <kat/consrv.hpp>
 #include <spdlog/spdlog.h>
-
-bool check = false;
-bool recreate = false;
-
-void aboutToCloseWinhandler() {
-    if (kat::windowCount() == 1 && !check) {
-        check = true;
-        recreate = true;
-        kat::setKeepOpen(true);
-        spdlog::info("Last window closing first time. Setting keep open for recreation.");
-    }
-}
-
-void closeWinhandler() {
-    spdlog::info("Close handler");
-    if (recreate) {
-        spdlog::info("Recreating last window.");
-        recreate = false;
-
-        kat::WindowSettings windowSettings{};
-        windowSettings.title = L"Sample Game 3";
-        kat::createWindow(windowSettings);
-
-        kat::setKeepOpen(false);
-        spdlog::info("Keep open off.");
-    }
-}
 
 int run(_In_ HINSTANCE hInstance,
         _In_opt_ HINSTANCE hPrevInstance,
@@ -51,15 +25,7 @@ int run(_In_ HINSTANCE hInstance,
 
     size_t window = kat::createWindow(windowSettings);
 
-    windowSettings.title = L"Sample Game 2";
-    size_t window2 = kat::createWindow(windowSettings);
-
     kat::start();
-
-    kat::getWindow(window)->OnClose.connect<&aboutToCloseWinhandler>();
-    kat::getWindow(window2)->OnClose.connect<&aboutToCloseWinhandler>();
-
-    kat::OnNoWindowsOpen.connect<&closeWinhandler>();
 
     MSG msg{};
     std::optional<int> ec;
@@ -68,6 +34,15 @@ int run(_In_ HINSTANCE hInstance,
     }
 
     return ec.value_or(EXIT_SUCCESS);
+}
+
+bool isConsoleOwner() {
+    HWND hwnd = GetConsoleWindow();
+    DWORD pid;
+    GetWindowThreadProcessId(hwnd, &pid);
+    DWORD cur_pid = GetCurrentProcessId();
+
+    return pid == cur_pid;
 }
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -87,5 +62,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     }
 
     kat::terminate();
+
+    if (isConsoleOwner()) {
+        // backup method to make sure that we can manage a system which doesn't have a copy of katconsrv.exe available.
+        printf("\nExited with code %d\n\nPress any key to exit....\n", ec);
+        while (!_kbhit()) std::this_thread::yield();
+    }
     return ec;
 }
