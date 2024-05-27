@@ -270,11 +270,11 @@ namespace kat {
 
     bool isIdealExplicitTransfer(const vk::QueueFamilyProperties& props) {
         // todo: update my vulkan sdk because I apparently don't have the definitions for VK_KHR_video_encode_queue
-        return !(props.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eVideoDecodeKHR /* | vk::QueueFlagBits::eVideoEncodeKHR */)) && (props.queueFlags & (vk::QueueFlagBits::eTransfer | vk::QueueFlagBits::eSparseBinding));
+        return !(props.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eVideoDecodeKHR | vk::QueueFlagBits::eVideoEncodeKHR)) && (props.queueFlags & (vk::QueueFlagBits::eTransfer | vk::QueueFlagBits::eSparseBinding));
     }
 
     bool isExplicitTransfer(const vk::QueueFamilyProperties& props) {
-        return !(props.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eVideoDecodeKHR /* | vk::QueueFlagBits::eVideoEncodeKHR */)) && (props.queueFlags & vk::QueueFlagBits::eTransfer);
+        return !(props.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eVideoDecodeKHR | vk::QueueFlagBits::eVideoEncodeKHR)) && (props.queueFlags & vk::QueueFlagBits::eTransfer);
     }
 
     bool isMostlyIdealExplicitTransfer(const vk::QueueFamilyProperties& props) {
