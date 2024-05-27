@@ -145,6 +145,95 @@ namespace kat {
         RedrawWindow(hwnd, nullptr, nullptr, RDW_INTERNALPAINT | RDW_UPDATENOW);
     }
 
+    vk::SurfaceFormatKHR selectSurfaceFormat(vk::SurfaceKHR surface) {
+        auto surfaceFormats = globalState->physicalDevice.getSurfaceFormatsKHR(surface);
+        std::optional<vk::SurfaceFormatKHR> rgbaFormat1;// r8g8b8a8_srgb
+        std::optional<vk::SurfaceFormatKHR> bgraFormat1;// b8g8r8a8_unorm
+        std::optional<vk::SurfaceFormatKHR> rgbaFormat2;// r8g8b8a8_unorm
+
+        for (const auto &sf: surfaceFormats) {
+            if (sf.colorSpace != vk::ColorSpaceKHR::eSrgbNonlinear) continue;
+            if (sf.format == vk::Format::eB8G8R8A8Srgb) return sf;
+            if (sf.format == vk::Format::eR8G8B8A8Srgb) rgbaFormat1 = sf;
+            if (sf.format == vk::Format::eB8G8R8A8Unorm) bgraFormat1 = sf;
+            if (sf.format == vk::Format::eR8G8B8A8Unorm) rgbaFormat2 = sf;
+        }
+
+        return rgbaFormat1.value_or(bgraFormat1.value_or(rgbaFormat2.value_or(surfaceFormats[0])));
+    }
+
+    vk::PresentModeKHR selectPresentMode(vk::SurfaceKHR surface) {
+        auto presentModes = globalState->physicalDevice.getSurfacePresentModesKHR(surface);
+        bool immediate = false;
+        bool fifo_relaxed = false;
+        for (const auto &pm: presentModes) {
+            switch (pm) {
+                case vk::PresentModeKHR::eImmediate:
+                    immediate = true;
+                    break;
+                case vk::PresentModeKHR::eMailbox:
+                    return vk::PresentModeKHR::eMailbox;
+                case vk::PresentModeKHR::eFifoRelaxed:
+                    fifo_relaxed = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (!globalState->vsync) return vk::PresentModeKHR::eFifo;
+
+        if (immediate) return vk::PresentModeKHR::eImmediate;
+        if (fifo_relaxed) return vk::PresentModeKHR::eFifoRelaxed;
+
+        return vk::PresentModeKHR::eFifo;// fallback on fifo as it is the only present mode which is required to be implemented (and I've seen systems where it is the only viable option).
+    }
+
+    vk::Extent2D correctSurfaceExtent(const vk::SurfaceCapabilitiesKHR &caps, GLFWwindow *window) {
+        if (caps.currentExtent.height == UINT32_MAX) {
+            int w, h;
+            glfwGetFramebufferSize(window, &w, &h);
+            return {std::clamp<uint32_t>(w, caps.minImageExtent.width, caps.maxImageExtent.width),
+                    std::clamp<uint32_t>(h, caps.minImageExtent.height, caps.maxImageExtent.height)};
+        }
+
+        return caps.currentExtent;
+    }
+
+    uint32_t calcMinImageCount(const vk::SurfaceCapabilitiesKHR &caps) {
+        uint32_t mic = caps.minImageCount + 1;
+        if (caps.maxImageCount > 0 && mic > caps.maxImageCount) return caps.maxImageCount;
+        return mic;
+    }
+
+    vk::SwapchainCreateInfoKHR setupSwapchainConfiguration(vk::SurfaceKHR surface, GLFWwindow *window) {
+        auto caps = globalState->physicalDevice.getSurfaceCapabilitiesKHR(surface);
+        vk::SwapchainCreateInfoKHR sci{};
+        sci.surface = surface;
+        sci.minImageCount = calcMinImageCount(caps);
+
+        vk::SurfaceFormatKHR sf = selectSurfaceFormat(surface);
+        sci.imageFormat = sf.format;
+        sci.imageColorSpace = sf.colorSpace;
+
+        sci.imageExtent = correctSurfaceExtent(caps, window);
+
+        sci.imageArrayLayers = 1;
+        sci.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
+        sci.imageSharingMode = vk::SharingMode::eExclusive;
+        sci.queueFamilyIndexCount = 0;
+        sci.pQueueFamilyIndices = nullptr;
+        sci.preTransform = caps.currentTransform;
+        sci.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+
+        sci.presentMode = selectPresentMode(surface);
+
+        sci.clipped = true;
+        sci.oldSwapchain = nullptr;
+
+        return sci;
+    }
+
     Window::Window(_In_ const WindowSettings &settings, _In_ size_t id) : m_Id(id) {
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -185,6 +274,22 @@ namespace kat {
         glfwSetKeyCallback(m_Window, kfun);
         glfwSetCharCallback(m_Window, chfun);
         glfwSetDropCallback(m_Window, dropfun);
+
+        // create surface
+        {
+            VkSurfaceKHR s;
+            glfwCreateWindowSurface(globalState->vkInstance, m_Window, nullptr, &s);
+            m_Surface = s;
+        }
+
+        // create swapchain
+        {
+            vk::SwapchainCreateInfoKHR sci = setupSwapchainConfiguration(m_Surface, m_Window);
+            m_Swapchain = globalState->device.createSwapchainKHR(sci);
+            m_Images = globalState->device.getSwapchainImagesKHR(m_Swapchain);
+
+            spdlog::debug("Created window swapchain with {} images", m_Images.size());
+        }
     }
 
     Window::~Window() {
@@ -209,10 +314,21 @@ namespace kat {
     }
 
     void Window::cleanup() {
-        if (m_Surface)
+        if (m_CleanedUp) return;
+
+        if (m_Swapchain) {
+            globalState->device.destroy(m_Swapchain);
+            m_Swapchain = nullptr;
+        }
+
+        if (m_Surface) {
             globalState->vkInstance.destroySurfaceKHR(m_Surface, nullptr, globalState->dldy);
+            m_Surface = nullptr;
+        }
+
 
         spdlog::debug("Cleaned up window internals.");
+        m_CleanedUp = true;
     }
 
     void Window::redraw() {
@@ -247,4 +363,18 @@ namespace kat {
         glfwSetWindowShouldClose(m_Window, true);
         OnCloseSignal.publish(this);
     }
+
+    vk::ResultValue<uint32_t> Window::acquireFrame(vk::Semaphore imageAvailableSemaphore) {
+        vk::AcquireNextImageInfoKHR anii{};
+        anii.semaphore = imageAvailableSemaphore;
+        anii.swapchain = m_Swapchain;
+        anii.timeout = UINT64_MAX;
+        return globalState->device.acquireNextImage2KHR(anii);
+    }
+
+    vk::Image Window::getImage(uint32_t index) const {
+        return m_Images[index];
+    }
+
+
 }// namespace kat

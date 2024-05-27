@@ -33,6 +33,7 @@ namespace kat {
 
         bool started = false;
         bool keepOpen = false; // set this to true to prevent the system from posting a WM_QUIT when the last window is destroyed (ex: if you need to recreate the window for some reason).
+        bool vsync = false;
 
         entt::registry entt_registry;
 

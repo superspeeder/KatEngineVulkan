@@ -82,12 +82,22 @@ namespace kat {
 
         void close();
 
+        [[nodiscard]] vk::ResultValue<uint32_t> acquireFrame(vk::Semaphore imageAvailableSemaphore);
+
+        [[nodiscard]] vk::Image getImage(uint32_t index) const;
+
       private:
         GLFWwindow* m_Window;
         size_t m_Id;
         vk::SurfaceKHR m_Surface;
 
         std::vector<void*> m_UserPointers;
+
+        vk::SwapchainKHR m_Swapchain;
+        std::vector<vk::Image> m_Images;
+
+        bool m_CleanedUp = false;
+
     };
 
 }// namespace kat

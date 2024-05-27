@@ -8,6 +8,11 @@
 
 #ifdef WINDOWS_APP
 #define BUILDING_WINDOWS_APP true
+void focusConsole() {
+    HWND hwnd = GetConsoleWindow();
+    SetForegroundWindow(hwnd);
+    SetActiveWindow(hwnd);
+}
 #else
 #define BUILDING_WINDOWS_APP false
 #endif
@@ -30,6 +35,9 @@ int run() {
     size_t window = kat::createWindow(windowSettings);
 
     kat::getWindow(window)->OnKey.connect<&onKey>();
+
+    spdlog::info("Primary Queue Family: {}", kat::globalState->primaryQueueFamily);
+    spdlog::info("Transfer Queue Family: {}", kat::globalState->transferQueueFamily);
 
     kat::start();
 
@@ -73,6 +81,7 @@ int main() {
 
 #ifdef WINDOWS_APP
     kat::consrv::RedirectConsoleIO(); // unnecessary if we are in console mode
+    focusConsole();
 #endif
 
     spdlog::set_level(spdlog::level::debug);

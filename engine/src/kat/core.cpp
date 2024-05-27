@@ -14,6 +14,9 @@ namespace kat {
 
     bool isPhysicalDeviceSupported(_In_ const vk::PhysicalDevice& pd);
     bool isPhysicalDeviceOptimal(_In_ const vk::PhysicalDevice& pd);
+    void selectQueueFamilies();
+    vk::Device createDevice();
+    void gatherQueues();
 
     GlobalState *globalState;
 
@@ -63,12 +66,18 @@ namespace kat {
             globalState->appVersion = initInfo.appVersion;
             globalState->vkInstance = createVulkanInstance(initInfo.appName, initInfo.appVersion, globalState->dldy, initInfo.enableDebug, &globalState->vkDebugMessenger);
             globalState->physicalDevice = selectPhysicalDevice();
-
+            selectQueueFamilies();
+            globalState->device = createDevice();
+            gatherQueues();
         }
     }
 
     void terminate() {
         if (globalState) {
+            if (globalState->device) {
+                globalState->device.destroy();
+            }
+
             if (globalState->vkDebugMessenger) {
                 globalState->vkInstance.destroy(globalState->vkDebugMessenger, nullptr, globalState->dldy);
             }
@@ -340,6 +349,8 @@ namespace kat {
             if (primaryQueue != UINT32_MAX && idealExplicitTransfer != UINT32_MAX) {
                 break;
             }
+
+            index++;
         }
 
         if (primaryQueue == UINT32_MAX) {
@@ -347,22 +358,62 @@ namespace kat {
         }
 
         if (idealExplicitTransfer != UINT32_MAX) {
+            spdlog::debug("Ideal explicit transfer family is found");
             globalState->transferQueueFamily = idealExplicitTransfer;
         } else if (mostlyIdealExplicitTransfer != UINT32_MAX) {
+            spdlog::debug("Mostly ideal explicit transfer family is found");
             globalState->transferQueueFamily = mostlyIdealExplicitTransfer;
         } else if (idealNonGraphicsTransfer != UINT32_MAX) {
+            spdlog::debug("Ideal non graphics transfer family is found");
             globalState->transferQueueFamily = idealNonGraphicsTransfer;
         } else if (explicitTransfer != UINT32_MAX) {
+            spdlog::debug("Explicit transfer family is found");
             globalState->transferQueueFamily = explicitTransfer;
         } else if (mostlyExplicitTransfer != UINT32_MAX) {
+            spdlog::debug("Mostly explicit transfer family is found");
             globalState->transferQueueFamily = mostlyExplicitTransfer;
         } else if (nonGraphicsTransfer != UINT32_MAX) {
+            spdlog::debug("Non graphics transfer family is found");
             globalState->transferQueueFamily = nonGraphicsTransfer;
         } else {
+            spdlog::debug("Transfer family falling back on primary");
             globalState->transferQueueFamily = primaryQueue; // no extra transfer queue which isn't graphics
         }
 
         globalState->primaryQueueFamily = primaryQueue;
     }
 
+    vk::Device createDevice() {
+        vk::DeviceCreateInfo ci{};
+
+        std::vector<const char*> extensions = {
+                VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        };
+
+        std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
+        std::array<float, 1> priorities = { 1.0f };
+
+        queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags{}, globalState->primaryQueueFamily, priorities);
+        if (globalState->primaryQueueFamily != globalState->transferQueueFamily) {
+            // exclusive queue found
+            queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags{}, globalState->transferQueueFamily, priorities);
+        }
+
+        vk::PhysicalDeviceFeatures2 f2{};
+
+        vk::PhysicalDeviceVulkan11Features v11f{};
+        vk::PhysicalDeviceVulkan12Features v12f{};
+        vk::PhysicalDeviceVulkan13Features v13f{};
+
+        ci.setPEnabledExtensionNames(extensions).setQueueCreateInfos(queueCreateInfos);
+
+        auto ci_structchain = vk::StructureChain(ci, f2, v11f, v12f, v13f);
+
+        return globalState->physicalDevice.createDevice(ci_structchain.get());
+    }
+
+    void gatherQueues() {
+        globalState->primaryQueue = globalState->device.getQueue(globalState->primaryQueueFamily, 0);
+        globalState->transferQueue = globalState->device.getQueue(globalState->transferQueueFamily, 0);
+    }
 }// namespace kat
