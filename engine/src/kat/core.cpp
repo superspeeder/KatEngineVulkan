@@ -28,19 +28,19 @@ namespace kat {
 
         switch (messageSeverity) {
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-                spdlog::debug("({}) {}", type_str, pCallbackData->pMessage);
+                spdlog::debug("[validation] ({}) {}", type_str, pCallbackData->pMessage);
                 break;
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-                spdlog::info("({}) {}", type_str, pCallbackData->pMessage);
+                spdlog::info("[validation] ({}) {}", type_str, pCallbackData->pMessage);
                 break;
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-                spdlog::warn("({}) {}", type_str, pCallbackData->pMessage);
+                spdlog::warn("[validation] ({}) {}", type_str, pCallbackData->pMessage);
                 break;
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-                spdlog::error("({}) {}", type_str, pCallbackData->pMessage);
+                spdlog::error("[validation] ({}) {}", type_str, pCallbackData->pMessage);
                 break;
             default:
-                spdlog::warn("* ({}) {}", type_str, pCallbackData->pMessage);
+                spdlog::warn("[validation] * ({}) {}", type_str, pCallbackData->pMessage);
                 break;
         }
 
@@ -49,27 +49,21 @@ namespace kat {
 
     void init(_In_ const EngineInitInfo &initInfo) {
         if (!globalState) {
+            glfwInit();
+            glfwSetErrorCallback(+[](int ec, const char* desc) {
+                spdlog::error("[glfw] ({}) {}", ec, desc);
+            });
+
+            glfwSetJoystickCallback(+[](int jid, int event) {
+                OnJoystickReconfigureSignal.publish(jid, event == GLFW_CONNECTED);
+            });
+
             globalState = new GlobalState();
-            globalState->hInstance = initInfo.hInstance;
-            globalState->nCmdShow = initInfo.nCmdShow;
             globalState->appName = initInfo.appName;
             globalState->appVersion = initInfo.appVersion;
             globalState->vkInstance = createVulkanInstance(initInfo.appName, initInfo.appVersion, globalState->dldy, initInfo.enableDebug, &globalState->vkDebugMessenger);
             globalState->physicalDevice = selectPhysicalDevice();
 
-            WNDCLASSEXW wc{};
-            wc.cbSize = sizeof(wc);
-            wc.hInstance = initInfo.hInstance;
-            wc.lpszClassName = WCNAME;
-            wc.lpfnWndProc = Window::globalProc;
-            wc.style = CS_HREDRAW | CS_VREDRAW;
-
-            ATOM a = RegisterClassExW(&wc);
-            if (a == 0) {
-                throw std::runtime_error("Failed to register window class");
-            }
-
-            spdlog::info("Registered Window Class");
         }
     }
 
@@ -83,6 +77,8 @@ namespace kat {
 
             delete globalState;
             globalState = nullptr;
+
+            glfwTerminate();
         }
     }
 
@@ -193,8 +189,8 @@ namespace kat {
         return true;
     }
 
-    void destroyWindow(_In_ HWND hwnd) {
-        Window* window = getWindow(hwnd);
+    void destroyWindow(_In_ GLFWwindow* wnd) {
+        Window* window = getWindow(wnd);
         if (window) {
             destroyWindow(window->getId());
         }
@@ -219,23 +215,20 @@ namespace kat {
         }
     }
 
-    Window *getWindow(_In_ HWND hwnd) {
-        LONG_PTR lp = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-        if (lp) {
-            return reinterpret_cast<Window*>(lp);
+    Window *getWindow(_In_ GLFWwindow* wnd) {
+        void* pWindow = glfwGetWindowUserPointer(wnd);
+        if (pWindow) {
+            return reinterpret_cast<Window*>(pWindow);
         }
         return nullptr;
     }
 
-    std::optional<int> pollMessages(LPMSG pMsg) {
-        while (PeekMessageW(pMsg, nullptr, 0, 0, PM_REMOVE) != 0) {
-            if (pMsg->message == WM_QUIT) {
-                return (int)pMsg->wParam;
-            }
+    std::optional<int> pollMessages() {
+        glfwPollEvents();
 
-            TranslateMessage(pMsg);
-            DispatchMessageW(pMsg);
-        }
+        if (globalState->exitCode != std::nullopt) return globalState->exitCode;
+
+        if (globalState->windows.empty()) return EXIT_SUCCESS;
 
         return std::nullopt;
     }
@@ -255,4 +248,121 @@ namespace kat {
     void setKeepOpen(bool keepOpen) {
         globalState->keepOpen = keepOpen;
     }
+
+    void updateWindows() {
+        std::vector<size_t> wins_to_destroy;
+        for (const auto& win : globalState->windows) {
+            if (win.second->shouldClose()) {
+                wins_to_destroy.push_back(win.first);
+            } else {
+                win.second->redraw();
+            }
+        }
+
+        for (const auto& win : wins_to_destroy) {
+            destroyWindow(win);
+        }
+    }
+
+    bool isPrimaryQueue(uint32_t index, const vk::QueueFamilyProperties& props) {
+        return (props.queueFlags & vk::QueueFlagBits::eGraphics) && globalState->physicalDevice.getWin32PresentationSupportKHR(index);
+    }
+
+    bool isIdealExplicitTransfer(const vk::QueueFamilyProperties& props) {
+        // todo: update my vulkan sdk because I apparently don't have the definitions for VK_KHR_video_encode_queue
+        return !(props.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eVideoDecodeKHR /* | vk::QueueFlagBits::eVideoEncodeKHR */)) && (props.queueFlags & (vk::QueueFlagBits::eTransfer | vk::QueueFlagBits::eSparseBinding));
+    }
+
+    bool isExplicitTransfer(const vk::QueueFamilyProperties& props) {
+        return !(props.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute | vk::QueueFlagBits::eVideoDecodeKHR /* | vk::QueueFlagBits::eVideoEncodeKHR */)) && (props.queueFlags & vk::QueueFlagBits::eTransfer);
+    }
+
+    bool isMostlyIdealExplicitTransfer(const vk::QueueFamilyProperties& props) {
+        return !(props.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute)) && (props.queueFlags & (vk::QueueFlagBits::eTransfer | vk::QueueFlagBits::eSparseBinding));
+    }
+
+    bool isMostlyExplicitTransfer(const vk::QueueFamilyProperties& props) {
+        return !(props.queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute)) && (props.queueFlags & vk::QueueFlagBits::eTransfer);
+    }
+
+    bool isIdealNonGraphicsTransfer(const vk::QueueFamilyProperties& props) {
+        return !(props.queueFlags & vk::QueueFlagBits::eGraphics) && (props.queueFlags & (vk::QueueFlagBits::eTransfer | vk::QueueFlagBits::eSparseBinding));
+    }
+
+    // by the time we are using this one, we really only want a transfer queue that isn't graphics :(
+    bool isNonGraphicsTransfer(const vk::QueueFamilyProperties& props) {
+        return !(props.queueFlags & vk::QueueFlagBits::eGraphics) && (props.queueFlags & vk::QueueFlagBits::eTransfer);
+    }
+
+    void selectQueueFamilies() {
+        uint32_t primaryQueue = UINT32_MAX;
+        // prefer sparse binding over explicit transfer queue
+        uint32_t idealExplicitTransfer = UINT32_MAX;
+        uint32_t mostlyIdealExplicitTransfer = UINT32_MAX;
+        uint32_t idealNonGraphicsTransfer = UINT32_MAX;
+
+        uint32_t explicitTransfer = UINT32_MAX;
+        uint32_t mostlyExplicitTransfer = UINT32_MAX;
+        uint32_t nonGraphicsTransfer = UINT32_MAX;
+
+        auto queueFamilies = globalState->physicalDevice.getQueueFamilyProperties();
+
+        uint32_t index = 0;
+        for (const auto& qf : queueFamilies) {
+            if (primaryQueue == UINT32_MAX && isPrimaryQueue(index, qf)) {
+                primaryQueue = index;
+            }
+
+            if (idealExplicitTransfer == UINT32_MAX && isIdealExplicitTransfer(qf)) {
+                idealExplicitTransfer = index;
+            }
+
+            if (isExplicitTransfer(qf)) {
+                explicitTransfer = index;
+            }
+
+            if (isMostlyIdealExplicitTransfer(qf)) {
+                mostlyIdealExplicitTransfer = index;
+            }
+
+            if (isMostlyExplicitTransfer(qf)) {
+                mostlyExplicitTransfer = index;
+            }
+
+            if (isIdealNonGraphicsTransfer(qf)) {
+                idealNonGraphicsTransfer = index;
+            }
+
+            if (isNonGraphicsTransfer(qf)) {
+                nonGraphicsTransfer = index;
+            }
+
+            if (primaryQueue != UINT32_MAX && idealExplicitTransfer != UINT32_MAX) {
+                break;
+            }
+        }
+
+        if (primaryQueue == UINT32_MAX) {
+            throw std::runtime_error("Missing primary queue");
+        }
+
+        if (idealExplicitTransfer != UINT32_MAX) {
+            globalState->transferQueueFamily = idealExplicitTransfer;
+        } else if (mostlyIdealExplicitTransfer != UINT32_MAX) {
+            globalState->transferQueueFamily = mostlyIdealExplicitTransfer;
+        } else if (idealNonGraphicsTransfer != UINT32_MAX) {
+            globalState->transferQueueFamily = idealNonGraphicsTransfer;
+        } else if (explicitTransfer != UINT32_MAX) {
+            globalState->transferQueueFamily = explicitTransfer;
+        } else if (mostlyExplicitTransfer != UINT32_MAX) {
+            globalState->transferQueueFamily = mostlyExplicitTransfer;
+        } else if (nonGraphicsTransfer != UINT32_MAX) {
+            globalState->transferQueueFamily = nonGraphicsTransfer;
+        } else {
+            globalState->transferQueueFamily = primaryQueue; // no extra transfer queue which isn't graphics
+        }
+
+        globalState->primaryQueueFamily = primaryQueue;
+    }
+
 }// namespace kat
